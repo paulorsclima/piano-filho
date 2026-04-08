@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎹 Piano do Filho</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; background: #0a0a1a; color: white; font-family: Arial, sans-serif; overflow: hidden; }
+#ui { display: flex; flex-direction: column; height: 100vh; }
+
+#topbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 14px; background: #11112a; border-bottom: 1px solid #222; flex-shrink: 0;
+}
+#topbar h1 { font-size: 17px; color: #a89ee8; margin-right: 4px; white-space: nowrap; }
+#song-bar { display: flex; gap: 6px; flex-wrap: wrap; }
+.song-btn {
+  padding: 6px 14px; border-radius: 16px; border: 2px solid transparent;
+  font-size: 13px; font-weight: bold; cursor: pointer;
+  background: #1e1e3a; color: #bbb; transition: transform .1s;
+}
+.song-btn:hover { transform: scale(1.04); }
+.song-btn.active { border-color: #7F77DD; background: #2b2860; color: #c4bef7; }
+#play-btn {
+  padding: 7px 22px; border-radius: 16px; border: none;
+  font-size: 14px; font-weight: bold; cursor: pointer;
+  background: #534AB7; color: white; margin-left: auto; white-space: nowrap;
+}
+#play-btn:disabled { background: #333; cursor: default; }
+.stat { font-size: 12px; color: #aaa; background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 7px; padding: 5px 10px; white-space: nowrap; }
+#speed-wrap { display: flex; align-items: center; gap: 5px; }
+
+#lyrics-row {
+  text-align: center; font-size: 18px; min-height: 34px; line-height: 34px;
+  color: #555; flex-shrink: 0; padding: 2px 0; background: #0c0c1e;
+}
+#lyrics-row strong { color: white; font-size: 24px; }
+
+#stage-wrap {
+  flex: 1; position: relative; overflow: hidden;
+  background: #0c0c1e; min-height: 0;
+}
+#stage { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; }
+
+#hit-line {
+  position: absolute; bottom: 0; left: 0; right: 0; height: 4px;
+  background: rgba(255,255,255,0.10);
+  pointer-events: none; z-index: 6;
+}
+
+.lane-v {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: rgba(255,255,255,0.04); pointer-events: none; z-index: 1;
+}
+
+.note-block {
+  position: absolute; border-radius: 7px; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: bold; color: white;
+  pointer-events: none;
+}
+
+#piano-wrap {
+  flex-shrink: 0; overflow: hidden;
+  background: #080818; border-top: 2px solid #1a1a3a;
+  width: 100%;
+}
+#piano-inner { position: relative; }
+
+.wkey {
+  position: absolute; border-radius: 0 0 8px 8px;
+  border: 1px solid rgba(0,0,0,0.55);
+  display: flex; align-items: flex-end; justify-content: center;
+  padding-bottom: 5px; font-size: 9px; font-weight: bold;
+  cursor: default; user-select: none; z-index: 1;
+  transition: filter .06s;
+}
+.bkey {
+  position: absolute; border-radius: 0 0 5px 5px;
+  border: 1px solid #000; background: #111;
+  cursor: default; user-select: none; z-index: 2;
+  transition: filter .06s;
+}
+
+/* acendimento automático quando a nota chega */
+.wkey.glowing { filter: brightness(3.0) !important; }
+.bkey.glowing { filter: brightness(3.5) !important; }
+
+@keyframes pulse {
+  0%,100% { filter: brightness(2.4); }
+  50%      { filter: brightness(3.6); }
+}
+.wkey.glowing { animation: pulse .22s ease-in-out infinite; }
+.bkey.glowing { animation: pulse .22s ease-in-out infinite; }
+
+#feedback {
+  position: fixed; bottom: 170px; left: 50%; transform: translateX(-50%);
+  font-size: 26px; font-weight: bold; pointer-events: none;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.9); z-index: 20;
+  opacity: 0; transition: opacity .15s;
+}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="topbar">
+    <h1>🎹 Piano</h1>
+    <div id="song-bar"></div>
+    <button id="play-btn" onclick="togglePlay()" disabled>Iniciar</button>
+    <div class="stat">Acertos: <span id="score">0</span></div>
+    <div class="stat">Seq: <span id="streak">0</span> 🔥</div>
+    <div id="speed-wrap">
+      <span class="stat">Vel.</span>
+      <input type="range" id="speed" min="0.3" max="1.3" step="0.1" value="0.7" style="width:65px">
+      <span class="stat" id="speed-val">0.7x</span>
+    </div>
+  </div>
+
+  <div id="lyrics-row">Escolha uma música</div>
+
+  <div id="stage-wrap">
+    <div id="stage"></div>
+    <div id="hit-line"></div>
+  </div>
+
+  <div id="piano-wrap">
+    <div id="piano-inner"></div>
+  </div>
+</div>
+<div id="feedback"></div>
+
+<script>
+const HAS_SHARP  = { C:true, D:true, F:true, G:true, A:true };
+const NOTE_PT    = { C:'Dó', D:'Ré', E:'Mi', F:'Fá', G:'Sol', A:'Lá', B:'Si' };
+const NOTE_COLORS = {
+  C:'#7F77DD', D:'#1D9E75', E:'#D85A30', F:'#D4537E',
+  G:'#378ADD', A:'#EF9F27', B:'#639922'
+};
+
+const WHITES = [];
+for (let o = 2; o <= 7; o++) {
+  for (const n of ['C','D','E','F','G','A','B']) {
+    WHITES.push({ id: n+o, name: n, oct: o });
+  }
+}
+
+function noteFreq(id) {
+  const m = id.match(/^([A-G])(s?)(\d)$/);
+  if (!m) return 440;
+  const S = {C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+  const midi = (parseInt(m[3])+1)*12 + S[m[1]] + (m[2]==='s'?1:0);
+  return 440 * Math.pow(2, (midi-69)/12);
+}
+
+const SONGS = {
+  'Parabéns': {
+    bpm: 80,
+    notes:  ['C4','C4','D4','C4','F4','E4','C4','C4','D4','C4','G4','F4','C4','C4','C5','A4','F4','E4','D4','As4','As4','A4','F4','G4','F4'],
+    lyrics: ['Pa','ra','béns','pra','vo','cê','Ne','sta','da','ta','que','ri','da','Mui','tas','fe','li','ci','da','des','Mui','tos','a','nos','de vida'],
+  },
+  'Brilha Estrela': {
+    bpm: 95,
+    notes:  ['C4','C4','G4','G4','A4','A4','G4','F4','F4','E4','E4','D4','D4','C4','G4','G4','F4','F4','E4','E4','D4','G4','G4','F4','F4','E4','E4','D4'],
+    lyrics: ['Bri','lha','bri','lha','es','tre','li','nha','Co','mo','sei','eu','o','que','és','Lá','no','céu','bem','a','ci','ma','Fe','i','to','u','ma','ban'],
+  },
+  'Borboletinha': {
+    bpm: 100,
+    notes:  ['E4','E4','F4','G4','G4','F4','E4','D4','C4','C4','D4','E4','E4','D4','D4','E4','E4','F4','G4','G4','F4','E4','D4','C4','C4','D4','E4','D4','C4','C4'],
+    lyrics: ['Bor','bo','le','ti','nha','tá','na','co','zi','nha','fa','zen','do','bo','lo','Pro','ca','sa','lão','','Bor','bo','le','ti','nha','tá','na','co','zi','nha'],
+  },
+  'Ode à Alegria': {
+    bpm: 88,
+    notes:  ['E4','E4','F4','G4','G4','F4','E4','D4','C4','C4','D4','E4','E4','D4','D4','E4','E4','F4','G4','G4','F4','E4','D4','C4','C4','D4','E4','D4','C4','C4'],
+    lyrics: ['A','le','gri','a','a','le','gri','a','luz','do','mun','do','és','tu','a','mor','A','le','gri','a','a','le','gri','a','bri','lha','sem','pre','em','nós'],
+  },
+  'Escala': {
+    bpm: 100,
+    notes:  ['C3','D3','E3','F3','G3','A3','B3','C4','D4','E4','F4','G4','A4','B4','C5','D5','E5','F5','G5','A5','B5','C6'],
+    lyrics: ['Dó','Ré','Mi','Fá','Sol','Lá','Si','Dó','Ré','Mi','Fá','Sol','Lá','Si','Dó','Ré','Mi','Fá','Sol','Lá','Si','Dó'],
+  }
+};
+
+let AudioCtx = null;
+let currentSong = null, playing = false;
+let step = 0, score = 0, streak = 0;
+let scheduled = [], active = [], rafId = null, lastTime = null, elapsed = 0;
+let WW = 28, BW = 18, WH = 120, BH = 75;
+let keyPos = {};
+
+const FALL_MS = 2600;
+const LIGHT_ZONE = 8; // px antes do fundo para acender
+
+function getAudio() {
+  if (!AudioCtx) AudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return AudioCtx;
+}
+function playTone(id, dur = 0.55) {
+  try {
+    const ctx = getAudio(), o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'triangle'; o.frequency.value = noteFreq(id);
+    g.gain.setValueAtTime(0.32, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    o.start(); o.stop(ctx.currentTime + dur);
+  } catch(e) {}
+}
+
+function buildPiano() {
+  const wrap  = document.getElementById('piano-wrap');
+  const inner = document.getElementById('piano-inner');
+  const availW = wrap.offsetWidth || window.innerWidth;
+
+  WW = Math.max(18, Math.floor(availW / WHITES.length));
+  BW = Math.round(WW * 0.60);
+  WH = Math.round(WW * 4.0);
+  BH = Math.round(WH * 0.60);
+
+  inner.style.width  = (WW * WHITES.length) + 'px';
+  inner.style.height = WH + 'px';
+  inner.innerHTML = '';
+  keyPos = {};
+
+  WHITES.forEach((n, i) => {
+    const x = i * WW;
+    const col = NOTE_COLORS[n.name];
+    keyPos[n.id] = { x, w: WW - 1, isBlack: false };
+    const el = document.createElement('div');
+    el.className = 'wkey';
+    el.id = 'key-' + n.id;
+    el.style.cssText = `left:${x}px;top:0;width:${WW-1}px;height:${WH}px;background:${col}22;color:${col}88;`;
+    if (n.name === 'C') el.textContent = 'Dó' + n.oct;
+    inner.appendChild(el);
+  });
+
+  WHITES.forEach((n, i) => {
+    if (!HAS_SHARP[n.name] || n.name === 'E' || n.name === 'B') return;
+    const sid = n.name + 's' + n.oct;
+    const x   = i * WW + WW - Math.round(BW / 2);
+    keyPos[sid] = { x, w: BW, isBlack: true };
+    const el = document.createElement('div');
+    el.className = 'bkey';
+    el.id = 'key-' + sid;
+    el.style.cssText = `left:${x}px;top:0;width:${BW}px;height:${BH}px;`;
+    inner.appendChild(el);
+  });
+
+  wrap.style.height = WH + 'px';
+  buildLanes();
+}
+
+function buildLanes() {
+  const stage = document.getElementById('stage');
+  stage.querySelectorAll('.lane-v').forEach(e => e.remove());
+  WHITES.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'lane-v';
+    d.style.left = (i * WW) + 'px';
+    stage.appendChild(d);
+  });
+}
+
+function buildSongs() {
+  const bar = document.getElementById('song-bar');
+  Object.keys(SONGS).forEach(name => {
+    const b = document.createElement('button');
+    b.className = 'song-btn'; b.textContent = name;
+    b.onclick = () => selectSong(name, b);
+    bar.appendChild(b);
+  });
+}
+
+function selectSong(name, btn) {
+  document.querySelectorAll('.song-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentSong = name; step = 0; score = 0; streak = 0;
+  playing = false; elapsed = 0; scheduled = []; active = [];
+  cancelAnimationFrame(rafId);
+  document.getElementById('score').textContent = 0;
+  document.getElementById('streak').textContent = 0;
+  document.getElementById('feedback').style.opacity = 0;
+  document.getElementById('lyrics-row').innerHTML = 'Pronto! Aperte <strong>Iniciar</strong>';
+  clearStage();
+  document.getElementById('play-btn').disabled = false;
+  document.getElementById('play-btn').textContent = 'Iniciar';
+}
+
+function clearStage() {
+  document.querySelectorAll('#stage .note-block').forEach(e => e.remove());
+  document.querySelectorAll('.wkey,.bkey').forEach(k => k.classList.remove('glowing'));
+  active = [];
+}
+
+function togglePlay() {
+  if (!currentSong) return;
+  if (playing) {
+    playing = false; cancelAnimationFrame(rafId);
+    document.getElementById('play-btn').textContent = 'Continuar';
+    document.getElementById('lyrics-row').textContent = 'Pausado';
+    document.querySelectorAll('.wkey,.bkey').forEach(k => k.classList.remove('glowing'));
+  } else {
+    playing = true;
+    document.getElementById('play-btn').textContent = 'Pausar';
+    if (step >= SONGS[currentSong].notes.length && active.length === 0) {
+      step = 0; score = 0; streak = 0; elapsed = 0; scheduled = []; active = [];
+      document.getElementById('score').textContent = 0;
+      document.getElementById('streak').textContent = 0;
+      clearStage();
+    }
+    lastTime = null;
+    scheduleNotes();
+    rafId = requestAnimationFrame(loop);
+  }
+}
+
+function scheduleNotes() {
+  const song = SONGS[currentSong];
+  const beatMs = 60000 / (song.bpm * getSpeed());
+  elapsed = 0;
+  scheduled = song.notes.slice(step).map((note, i) => ({
+    note, lyric: song.lyrics[step + i] || '', idx: step + i,
+    triggerMs: i * beatMs
+  }));
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTime) lastTime = ts;
+  elapsed += ts - lastTime; lastTime = ts;
+
+  const stageH  = document.getElementById('stage-wrap').offsetHeight || 300;
+  const fallDur = FALL_MS / getSpeed();
+
+  while (scheduled.length && scheduled[0].triggerMs <= elapsed) {
+    spawnNote(scheduled.shift(), fallDur, stageH);
+  }
+
+  const now = performance.now();
+
+  // mover notas e controlar acendimento
+  active.forEach(n => {
+    const pct   = (now - n.born) / fallDur;
+    n.currentY  = pct * (stageH + 55) - n.h;
+    n.el.style.top = n.currentY + 'px';
+
+    const bottomEdge = n.currentY + n.h;
+    const inZone     = bottomEdge >= (stageH - LIGHT_ZONE) && n.currentY <= stageH + 4;
+
+    const keyEl = document.getElementById('key-' + n.note);
+    if (keyEl) {
+      if (inZone && !n.lit) {
+        n.lit = true;
+        keyEl.classList.add('glowing');
+        playTone(n.note);
+      } else if (!inZone && n.lit) {
+        n.lit = false;
+        keyEl.classList.remove('glowing');
+      }
+    }
+  });
+
+  // remover notas que saíram
+  active.filter(n => n.currentY > stageH + 60).forEach(n => {
+    n.el.remove();
+    document.getElementById('key-' + n.note)?.classList.remove('glowing');
+    active = active.filter(x => x !== n);
+  });
+
+  // fim da música
+  if (scheduled.length === 0 && active.length === 0 && step >= SONGS[currentSong].notes.length) {
+    playing = false;
+    document.getElementById('play-btn').textContent = 'Reiniciar';
+    document.getElementById('lyrics-row').innerHTML = '<strong>🎉 Parabéns! Música completa!</strong>';
+    showFeedback('Você arrasou! 🌟', '#a89ee8');
+    return;
+  }
+
+  rafId = requestAnimationFrame(loop);
+}
+
+function spawnNote(s, fallDur, stageH) {
+  const pos = keyPos[s.note];
+  if (!pos) return;
+
+  const col = NOTE_COLORS[s.note[0]] || '#7F77DD';
+  const el  = document.createElement('div');
+  el.className = 'note-block';
+  el.style.cssText = `left:${pos.x + 2}px;width:${pos.w - 3}px;height:44px;background:${col};top:-50px;`;
+  el.textContent = NOTE_PT[s.note[0]] || s.note[0];
+  document.getElementById('stage').appendChild(el);
+
+  active.push({
+    note: s.note, lyric: s.lyric, idx: s.idx,
+    el, born: performance.now(), h: 44, currentY: -50, lit: false
+  });
+
+  step = Math.max(step, s.idx + 1);
+  if (s.lyric) document.getElementById('lyrics-row').innerHTML = `<strong>${s.lyric}</strong>`;
+}
+
+function showFeedback(msg, color) {
+  const el = document.getElementById('feedback');
+  el.textContent = msg; el.style.color = color; el.style.opacity = '1';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.opacity = '0'; }, 1200);
+}
+
+function getSpeed() { return parseFloat(document.getElementById('speed').value); }
+document.getElementById('speed').addEventListener('input', e => {
+  document.getElementById('speed-val').textContent = parseFloat(e.target.value).toFixed(1) + 'x';
+});
+
+buildPiano();
+buildSongs();
+window.addEventListener('resize', () => { buildPiano(); clearStage(); });
+</script>
+</body>
+</html>
