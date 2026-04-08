@@ -1,9 +1,10 @@
 {
   "name": "piano-filho",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "App piano 72 teclas",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
